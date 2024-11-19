@@ -288,32 +288,46 @@ def generate_csv(machine, source_plate, eplate_scheme, plasmid_vol, cells_vol, r
     if machine != "Echo 550" and machine != "HTP Electroporator (Randy)":
         return None
 
+    # Extract source plate data
     source_data = source_plate.stack().reset_index()
     source_data.columns = ["Source Row", "Source Column", "Content"]
     source_data = source_data[source_data["Content"] != ""]
 
+    # Extract eplate scheme data
     eplate_data = eplate_scheme.stack().reset_index()
     eplate_data.columns = ["Dest Row", "Dest Column", "Content"]
     eplate_data = eplate_data[eplate_data["Content"] == "X"]
 
     csv_entries = []
+    used_wells = set()
+
+    # Identify the host well
+    host_row = source_data[source_data["Content"].str.contains("Host", case=False)]
+    if len(host_row) == 0:
+        raise ValueError("No host found in the source plate. Ensure at least one host is defined.")
+    host_well = f"{host_row.iloc[0]['Source Row']}{host_row.iloc[0]['Source Column']}"
 
     if machine == "Echo 550":
         for _, source_row in source_data.iterrows():
             source_well = f"{source_row['Source Row']}{source_row['Source Column']}"
             content = source_row['Content']
+
             if "Plasmid" in content:
+                replicate_count = 0
                 for _, dest_row in eplate_data.iterrows():
+                    if replicate_count >= replicates:
+                        break
                     dest_well = f"{dest_row['Dest Row']}{dest_row['Dest Column']}"
-                    csv_entries.append([source_well, "Source Plate", dest_well, "Destination Plate", plasmid_vol])
-            elif "Host" in content:
-                assigned_dest_wells = eplate_data.iloc[:replicates]
-                for _, dest_row in assigned_dest_wells.iterrows():
-                    dest_well = f"{dest_row['Dest Row']}{dest_row['Dest Column']}"
-                    csv_entries.append([source_well, "Source Plate", dest_well, "Destination Plate", cells_vol])
-                eplate_data = eplate_data.iloc[replicates:]
+                    if dest_well not in used_wells:
+                        # Add plasmid to the destination well
+                        csv_entries.append([source_well, "Source Plate", dest_well, "Destination Plate", plasmid_vol])
+                        # Add host cells to the same well
+                        csv_entries.append([host_well, "Source Plate", dest_well, "Destination Plate", cells_vol])
+                        used_wells.add(dest_well)
+                        replicate_count += 1
 
     elif machine == "HTP Electroporator (Randy)":
+        # Generate CSV for electroporation conditions
         csv_buffer = io.StringIO()
         st.session_state["electroporation_table"].to_csv(csv_buffer, index=False)
         csv_buffer.seek(0)
@@ -329,6 +343,7 @@ def generate_csv(machine, source_plate, eplate_scheme, plasmid_vol, cells_vol, r
         csv_df.to_csv(csv_buffer, index=False)
         csv_buffer.seek(0)
         return csv_buffer
+
 
 # Run the Streamlit app
 if __name__ == "__main__":
